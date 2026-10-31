@@ -29,10 +29,6 @@ export type AuthUser = VerifiedAuthUser
  * Attach with `.middleware([authMiddleware])` on any server function that
  * needs an authenticated caller. Use {@link requireUser} to unwrap the user
  * and throw 401 when missing.
- *
- * **Note**: `cloudflare:workers` is imported dynamically inside the server
- * callback so that the client bundle never includes the Cloudflare-specific
- * module (which would break the browser build).
  */
 export const authMiddleware = createMiddleware({ type: "function" })
   .client(async ({ next }) => {
@@ -49,11 +45,11 @@ export const authMiddleware = createMiddleware({ type: "function" })
     })
   })
   .server(async ({ next }) => {
-    // Dynamic import so the client bundle never pulls in `cloudflare:workers`.
-    const { env } = await import("cloudflare:workers")
+    // Dynamic import keeps the env module out of the client bundle.
+    const { getServerEnv } = await import("@/lib/server/env")
     const user = await verifyNeonJwt(
       extractBearer(getRequestHeader("authorization")),
-      env
+      getServerEnv()
     )
     return next({ context: { user } })
   })

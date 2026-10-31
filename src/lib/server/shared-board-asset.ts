@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm"
 
+import { assetStore } from "@/lib/server/asset-store"
 import { withDb } from "@/lib/db/client"
 import { assets, sharedBoardLinks, sharedBoards } from "@/lib/db/schema"
 
@@ -27,8 +28,7 @@ export function parseSharedBoardAssetPath(pathname: string): {
  * blob with immutable cache headers.
  */
 export async function serveSharedBoardAsset(
-  request: Request,
-  env: Env
+  request: Request
 ): Promise<Response | null> {
   const url = new URL(request.url)
   const parsed = parseSharedBoardAssetPath(url.pathname)
@@ -71,7 +71,7 @@ export async function serveSharedBoardAsset(
     return new Response("Not Found", { status: 404 })
   }
 
-  const object = await env.MARKX_BUCKET.get(resolved.objectKey)
+  const object = await assetStore.get(resolved.objectKey)
   if (!object) {
     return new Response("Not Found", { status: 404 })
   }

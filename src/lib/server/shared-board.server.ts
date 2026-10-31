@@ -1,5 +1,6 @@
 import { and, eq, inArray, sql } from "drizzle-orm"
 
+import { assetStore } from "@/lib/server/asset-store"
 import { withDb } from "@/lib/db/client"
 import {
   assets,
@@ -548,8 +549,7 @@ export async function duplicateSharedBoardToWorkspaceForUser(
       folderId: newFolderId,
     }))
 
-    // Copy image blobs from the owner's R2 keys into the caller's namespace.
-    const { env } = await import("cloudflare:workers")
+    // Copy image blobs from the owner's asset keys into the caller's namespace.
     const ownerAssetRows = await db
       .select()
       .from(assets)
@@ -576,10 +576,10 @@ export async function duplicateSharedBoardToWorkspaceForUser(
       const newImageId = img.id
       const newKey = assetKey(userId, newImageId)
       try {
-        const obj = await env.MARKX_BUCKET.get(source.objectKey)
+        const obj = await assetStore.get(source.objectKey)
         if (obj) {
           const bytes = new Uint8Array(await obj.arrayBuffer())
-          await env.MARKX_BUCKET.put(newKey, bytes, {
+          await assetStore.put(newKey, bytes, {
             httpMetadata: { contentType: img.mime },
           })
           newAssetRows.push({

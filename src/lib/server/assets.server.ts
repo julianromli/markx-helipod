@@ -4,6 +4,7 @@ import { decodeDataUrl, encodeDataUrl } from "@/lib/data-url"
 import { withDb } from "@/lib/db/client"
 import type { Database } from "@/lib/db/client"
 import { assets } from "@/lib/db/schema"
+import { assetStore } from "@/lib/server/asset-store"
 import {
   ASSET_CLEANUP_CONCURRENCY,
   ASSET_RETENTION_DAYS,
@@ -27,8 +28,6 @@ export async function softDeleteAssetRows(
 }
 
 export async function cleanupExpiredAssets(): Promise<void> {
-  const { env } = await import("cloudflare:workers")
-
   await withDb(async ({ db }) => {
     const cutoff = new Date(
       Date.now() - ASSET_RETENTION_DAYS * 24 * 60 * 60 * 1000
@@ -44,7 +43,7 @@ export async function cleanupExpiredAssets(): Promise<void> {
         ASSET_CLEANUP_CONCURRENCY,
         async (row) => {
           try {
-            await env.MARKX_BUCKET.delete(row.objectKey)
+            await assetStore.delete(row.objectKey)
             return row.id
           } catch (error) {
             console.error(
@@ -86,7 +85,6 @@ export async function uploadImageAssetForUser(
   }
 
   const objectKey = assetKey(userId, input.imageId)
-  const { env } = await import("cloudflare:workers")
 
   return withDb(async ({ db }) => {
     return db.transaction(async (tx) => {
@@ -121,7 +119,7 @@ export async function uploadImageAssetForUser(
       }
 
       try {
-        await env.MARKX_BUCKET.put(objectKey, decoded.bytes, {
+        await assetStore.put(objectKey, decoded.bytes, {
           httpMetadata: { contentType: input.mime },
         })
 
@@ -136,7 +134,7 @@ export async function uploadImageAssetForUser(
         // the corresponding object while competing inserts are still blocked.
         if (inserted.length > 0) {
           try {
-            await env.MARKX_BUCKET.delete(objectKey)
+            await assetStore.delete(objectKey)
           } catch (cleanupError) {
             console.error(
               `[asset upload] failed to compensate ${objectKey}`,
@@ -151,8 +149,6 @@ export async function uploadImageAssetForUser(
 }
 
 export async function fetchImageAssetForUser(userId: string, imageId: string) {
-  const { env } = await import("cloudflare:workers")
-
   return withDb(async ({ db }) => {
     const ownedRows = await db
       .select({ mime: assets.mime, deletedAt: assets.deletedAt })
@@ -165,7 +161,7 @@ export async function fetchImageAssetForUser(userId: string, imageId: string) {
     }
     const owned = ownedRows[0]
 
-    const object = await env.MARKX_BUCKET.get(assetKey(userId, imageId))
+    const object = await assetStore.get(assetKey(userId, imageId))
     if (!object) {
       return { ok: false as const, reason: "not_found" as const }
     }

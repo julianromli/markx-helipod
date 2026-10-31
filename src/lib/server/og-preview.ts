@@ -1,3 +1,4 @@
+import { assetStore } from "@/lib/server/asset-store"
 import { isSafePublicHttpUrl } from "@/lib/server/guest-guards"
 import {
   MAX_OG_PREVIEW_BYTES,
@@ -39,9 +40,7 @@ export async function mirrorOgImageToR2(
   const objectKey = ogPreviewObjectKey(hash)
   const path = ogPreviewPath(hash)
 
-  const { env } = await import("cloudflare:workers")
-
-  const existing = await env.MARKX_BUCKET.head(objectKey)
+  const existing = await assetStore.head(objectKey)
   if (existing) return path
 
   let response: Response
@@ -74,7 +73,7 @@ export async function mirrorOgImageToR2(
     return null
   }
 
-  await env.MARKX_BUCKET.put(objectKey, bytes, {
+  await assetStore.put(objectKey, bytes, {
     httpMetadata: { contentType: mime },
   })
 
@@ -82,8 +81,7 @@ export async function mirrorOgImageToR2(
 }
 
 export async function serveOgPreview(
-  request: Request,
-  env: Env
+  request: Request
 ): Promise<Response | null> {
   const url = new URL(request.url)
   const hash = parseOgPreviewHash(url.pathname)
@@ -93,7 +91,7 @@ export async function serveOgPreview(
     return new Response("Method Not Allowed", { status: 405 })
   }
 
-  const object = await env.MARKX_BUCKET.get(ogPreviewObjectKey(hash))
+  const object = await assetStore.get(ogPreviewObjectKey(hash))
   if (!object) {
     return new Response("Not Found", { status: 404 })
   }

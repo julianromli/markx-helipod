@@ -39,3 +39,20 @@ Components live in `src/components/ui` and are imported as:
 ```tsx
 import { Button } from "@/components/ui/button";
 ```
+
+## Production (Node)
+
+The app runs as a plain Node server (no platform-specific bindings):
+
+```bash
+bun run build
+bun run start    # srvx: static dist/client + SSR dist/server/server.js
+```
+
+Configuration comes from environment variables (see `.dev.vars.example`
+for the full list): `DATABASE_URL` (Neon Postgres pooler),
+`NEON_AUTH_BASE_URL`, `NEON_AUTH_JWKS_URL`, Mayar billing vars, and
+`MARKX_ASSETS_DIR` (disk asset store — point it at a persistent volume).
+
+A `Dockerfile` is included; it builds the app and serves on port `3000`
+with a `/health` endpoint for container health checks.

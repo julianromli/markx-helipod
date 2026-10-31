@@ -26,9 +26,10 @@ function getJwks(jwksUrl: string, issuer: string) {
  */
 export async function verifyNeonJwt(
   token: string | null | undefined,
-  env: { NEON_AUTH_JWKS_URL: string; NEON_AUTH_BASE_URL: string }
+  env: { NEON_AUTH_JWKS_URL?: string; NEON_AUTH_BASE_URL?: string }
 ): Promise<VerifiedAuthUser | null> {
   if (!token) return null
+  if (!env.NEON_AUTH_BASE_URL || !env.NEON_AUTH_JWKS_URL) return null
 
   const issuer = new URL(env.NEON_AUTH_BASE_URL).origin
   const jwks = getJwks(env.NEON_AUTH_JWKS_URL, issuer)

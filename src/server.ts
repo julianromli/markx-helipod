@@ -1,6 +1,5 @@
-/// <reference types="@cloudflare/vite-plugin" />
 import handler from "@tanstack/react-start/server-entry"
-import { cleanupExpiredAssets } from "@/lib/server/assets.server"
+import { startAssetCleanupCron } from "@/lib/server/asset-cleanup-cron"
 import {
   buildAuthProxyHeaders,
   buildAuthTargetUrl,
@@ -8,20 +7,39 @@ import {
   isEmailOtpSendPath,
   rewriteAuthCookie,
 } from "@/lib/server/auth-proxy"
+import { getServerEnv } from "@/lib/server/env"
 import { checkOtpSendRateLimit } from "@/lib/server/otp-send-rate-limit"
 import { serveOgPreview } from "@/lib/server/og-preview"
 import { serveSharedBoardAsset } from "@/lib/server/shared-board-asset"
 
 /**
+ * Server entry for the Node deployment.
+ *
+ * Request pipeline (all same-origin, no platform-specific bindings):
+ *
+ *  1. `/health` — liveness probe for the container platform.
+ *  2. `/api/auth/*` — same-origin reverse proxy for Neon Auth (Better Auth).
+ *  3. `/og/...`, `/s/.../asset/...` — stored image assets.
+ *  4. Everything else — the TanStack Start SSR handler.
+ *
+ * The daily asset-cleanup job (previously a Workers cron trigger) starts
+ * here on boot in production.
+ */
+
+if (process.env.NODE_ENV === "production") {
+  startAssetCleanupCron()
+}
+
+/**
  * Same-origin reverse proxy for Neon Auth (Better Auth).
  *
- * The browser calls `/api/auth/*` on the Worker origin. We forward each
- * request to the managed Neon Auth service, then rewrite Set-Cookie headers
- * so the session cookies become first-party (no Domain attribute). This
- * avoids Safari ITP blocking third-party cookies on the cross-origin auth
- * host while keeping JWT verification against the Neon JWKS endpoint.
+ * The browser calls `/api/auth/*` on this origin. We forward each request
+ * to the managed Neon Auth service, then rewrite Set-Cookie headers so the
+ * session cookies become first-party (no Domain attribute). This avoids
+ * Safari ITP blocking third-party cookies on the cross-origin auth host
+ * while keeping JWT verification against the Neon JWKS endpoint.
  */
-async function proxyAuth(request: Request, env: Env): Promise<Response | null> {
+async function proxyAuth(request: Request): Promise<Response | null> {
   const url = new URL(request.url)
   if (!isAuthProxyPath(url.pathname)) return null
 
@@ -34,12 +52,16 @@ async function proxyAuth(request: Request, env: Env): Promise<Response | null> {
     if (limited) return limited
   }
 
-  const target = buildAuthTargetUrl(request.url, env.NEON_AUTH_BASE_URL)
+  const authBaseUrl = getServerEnv().NEON_AUTH_BASE_URL
+  if (!authBaseUrl) {
+    return new Response("Auth is not configured", { status: 503 })
+  }
+  const target = buildAuthTargetUrl(request.url, authBaseUrl)
 
   // Build a minimal header set for the upstream request. We deliberately do
-  // NOT copy all request headers — the browser/dev-server sends headers
-  // (Host, X-Forwarded-*, Referer, …) that Better Auth's hostname validation
-  // rejects. The Workers runtime auto-sets `Host` from the target URL.
+  // NOT copy all request headers — browsers send headers (Host,
+  // X-Forwarded-*, Referer, …) that Better Auth's hostname validation
+  // rejects.
   const headers = buildAuthProxyHeaders(request.headers)
 
   const upstream = await fetch(target, {
@@ -72,31 +94,23 @@ async function proxyAuth(request: Request, env: Env): Promise<Response | null> {
 }
 
 export default {
-  async fetch(
-    request: Request,
-    env: Env,
-    _ctx: ExecutionContext
-  ): Promise<Response> {
-    const authResponse = await proxyAuth(request, env)
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url)
+
+    if (url.pathname === "/health") {
+      return new Response("OK", { status: 200 })
+    }
+
+    const authResponse = await proxyAuth(request)
     if (authResponse) return authResponse
 
-    const ogPreview = await serveOgPreview(request, env)
+    const ogPreview = await serveOgPreview(request)
     if (ogPreview) return ogPreview
 
-    const sharedAsset = await serveSharedBoardAsset(request, env)
+    const sharedAsset = await serveSharedBoardAsset(request)
     if (sharedAsset) return sharedAsset
 
-    // TanStack Start's handler only needs the Request. Cloudflare bindings
-    // (env) are accessed inside server functions via `cloudflare:workers`,
-    // and `ctx` is used here only for `waitUntil` on the scheduled path.
+    // TanStack Start's handler only needs the Request.
     return handler.fetch(request)
-  },
-
-  async scheduled(
-    _event: ScheduledEvent,
-    _env: Env,
-    ctx: ExecutionContext
-  ): Promise<void> {
-    ctx.waitUntil(cleanupExpiredAssets())
   },
 }

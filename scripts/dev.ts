@@ -1,8 +1,14 @@
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
-const HYPERDRIVE_ENV =
-  "CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE"
+/**
+ * Dev launcher.
+ *
+ * Loads `.dev.vars` into `process.env` (server code reads configuration from
+ * `process.env`; see `src/lib/server/env.ts`) and starts the Vite dev
+ * server. Extra CLI args are forwarded to Vite.
+ */
+
 const DEV_VARS_PATH = resolve(import.meta.dirname, "..", ".dev.vars")
 
 function parseDevVars(contents: string): Record<string, string> {
@@ -30,28 +36,22 @@ function parseDevVars(contents: string): Record<string, string> {
   return vars
 }
 
-if (!existsSync(DEV_VARS_PATH)) {
-  console.error(
-    `Missing ${DEV_VARS_PATH}. Copy .dev.vars.example to .dev.vars and set DATABASE_URL.`
-  )
-  process.exit(1)
-}
+if (existsSync(DEV_VARS_PATH)) {
+  const devVars = parseDevVars(readFileSync(DEV_VARS_PATH, "utf8"))
+  for (const [key, value] of Object.entries(devVars)) {
+    process.env[key] ??= value
+  }
 
-const devVars = parseDevVars(readFileSync(DEV_VARS_PATH, "utf8"))
-const databaseUrl = devVars.DATABASE_URL
-
-if (!databaseUrl) {
-  console.error("DATABASE_URL is required in .dev.vars for local development.")
-  process.exit(1)
-}
-
-if (databaseUrl.includes("ep-lingering-dust-azywq1po")) {
+  if (devVars.DATABASE_URL?.includes("ep-lingering-dust-azywq1po")) {
+    console.warn(
+      "DATABASE_URL points at the production Neon endpoint. A long local session keeps production compute active and burns CU-hours. Use a Neon development branch."
+    )
+  }
+} else {
   console.warn(
-    "DATABASE_URL points at the production Neon endpoint. A long local session keeps production compute active and burns CU-hours. Use a Neon development branch."
+    `No ${DEV_VARS_PATH} found. Copy .dev.vars.example to .dev.vars and set DATABASE_URL for local development.`
   )
 }
-
-process.env[HYPERDRIVE_ENV] ??= devVars[HYPERDRIVE_ENV] ?? databaseUrl
 
 // Ship Studio (and similar launchers) assign the port via PORT; keep 3000
 // for manual runs. Extra CLI args are forwarded so launchers can pass flags.
